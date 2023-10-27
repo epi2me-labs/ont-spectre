@@ -253,6 +253,7 @@ class CNVAnalysis(object):
                                                           self.bin_size, each_chromosome, self.sample_id,
                                                           self.cnv_metrics.del_border, self.cnv_metrics.dup_border)
 
+            self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in candidates_cnv_list])
             # Generating CNV IDs
             new_ids = CNV_ID.n_id_generator(len(candidates_cnv_list), cnv_id_list)
             self.existing_cnv_ids = self.existing_cnv_ids + new_ids
@@ -274,6 +275,9 @@ class CNVAnalysis(object):
             final_cnv_candidates = self.merge_candidates(candidates_cnv_list, each_chromosome)
             cnv_call_list = self.scaffold_candidates(final_cnv_candidates, each_chromosome) \
                 if len(final_cnv_candidates) >= 2 else final_cnv_candidates
+            
+            self.logger.debug('Candidates after scaffolding:')
+            self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in cnv_call_list])
             self.cnv_calls_list[each_chromosome] = cnv_call_list
         pass
 
@@ -287,12 +291,19 @@ class CNVAnalysis(object):
             while n_merges > 0:
                 merge_rounds += 1
                 self.logger.debug(f'Current merge cycle {merge_rounds}')
-                # self.logger.info(f'n candidates in {chromosome_name}: {len(merged_candidates)}')
+                self.logger.info(f'n candidates in {chromosome_name}: {len(merged_candidates)}')
                 [n_merges, merged_candidates, dev_candidates_string] = self.cnv_candidate_merge(merged_candidates)
-            # self.logger.debug(dev_candidates_string)
+                self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in merged_candidates])
+                
+            self.logger.debug(f'dev_candidates_string: {dev_candidates_string}')
             self.logger.debug(f'Total merge rounds: {merge_rounds}')
             candidates_cnv_list = self.clean_merged_candidates(merged_candidates)
-            # self.logger.debug(f'n candidates {chromosome_name}: {len(candidates_cnv_list)}')
+
+            self.logger.debug('Candidates after merging and filtering:')
+            self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in candidates_cnv_list])
+            self.logger.debug(f'n candidates {chromosome_name}: {len(candidates_cnv_list)}')
+        else:
+            candidates_cnv_list = self.clean_merged_candidates(candidates_cnv_list)
         return candidates_cnv_list
 
     def cnv_candidate_merge(self, cnv_candidates):
