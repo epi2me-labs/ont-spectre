@@ -18,6 +18,7 @@ class CNVMetrics(object):
         self.output_dir = output_dir
         self.as_dev = as_dev
         logger.basicConfig(level=logger.DEBUG) if as_dev else logger.basicConfig(level=logger.INFO)
+        logger.getLogger('matplotlib').setLevel(logger.WARNING)
         self.logger = logger
         # conversion
         self.df_mosdepth_coverage = self.__convert_genome_analysis_to_coverage_dataframe(genome_analysis)
