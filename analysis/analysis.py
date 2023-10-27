@@ -64,6 +64,7 @@ class CNVAnalysis(object):
         # TODO
         self.min_chr_length = 1e6
         self.max_std_outlier_rm = 5
+        self.max_std_outlier_cn = 10
         self.mosdepth_cov_genome_chr_diff = 0.10  # 10%
         self.lower_2n_threshold = 0.0  # are overwritten after data_normalization was called
         self.upper_2n_threshold = 0.0  # are overwritten after data_normalization was called
@@ -174,7 +175,7 @@ class CNVAnalysis(object):
             [avg, std] = [float(use_this_avg_cov), np.nanstd(self.coverage)]
             for idx in range(0, self.coverage.size, 1):
                 cov = self.coverage[idx]
-                if cov > avg + (self.max_std_outlier_rm * std):
+                if cov > (self.max_std_outlier_cn * avg) + (self.max_std_outlier_rm * std):
                     self.coverage[idx] = np.NaN
 
             # re-calculate avg, std, median without outliers (right tail)
