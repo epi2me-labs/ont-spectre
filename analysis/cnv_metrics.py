@@ -304,9 +304,12 @@ class CNVMetrics(object):
         :param dup_border_multiplier: Multiplier for the tightness of the upper (duplication) border
         :return: Tupel with deletion border and duplication border (DEL,DUP)
         """
-        mean = float(np.mean(self.df_coverage_candidate_no_excl_zone_random_samples['coverage']))
-        sd = float(np.std(self.df_coverage_candidate_no_excl_zone_random_samples['coverage']))
-        var = np.var(self.df_coverage_candidate_no_excl_zone_random_samples['coverage'])
+        cov_values = self.df_coverage_candidate_no_excl_zone_random_samples['coverage'].values
+        mean = float(np.mean(cov_values))
+        std = np.std(cov_values)
+        sd = float(np.std(cov_values[cov_values < mean + (5 * std)]))
+        self.logger.debug(f"CNV-Metrics: std and sd: {std}, {sd}")
+        # var = np.var(self.df_coverage_candidate_no_excl_zone_random_samples['coverage'])
 
         # Rough border estimation
         lower_border = mean - (sd * del_border_multiplier)
