@@ -166,7 +166,6 @@ class CNVAnalysis(object):
         if self.coverage.size > 0:
             # calculate avg, std, median and remove outliers (right tail)
             # use genome-wide average
-            # NOTE: select average coverage from genome-wide or chromosome depending on how different they are
             genome_avg_cov = self.mosdepth_data.genome_mean_coverage
             chromosome_avg_coverage = np.nanmean(self.coverage)
             [avg, std] = [float(genome_avg_cov), np.nanstd(self.coverage)]
@@ -178,6 +177,9 @@ class CNVAnalysis(object):
             # re-calculate avg, std, median without outliers (right tail)
             chromosome_avg_coverage = np.nanmean(self.coverage)
             [avg, std, med] = [float(genome_avg_cov), np.nanstd(self.coverage), np.nanmedian(self.coverage)]
+
+            if chromosome == 'chrY' and chromosome_avg_coverage < genome_avg_cov * 0.75:
+                genome_avg_cov /= 2
             self.logger.debug([f'avg: {genome_avg_cov}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
 
             if chromosome in self.genome_info["chr_lengths_by_name"]:
