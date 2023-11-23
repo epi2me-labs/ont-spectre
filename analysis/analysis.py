@@ -73,6 +73,22 @@ class CNVAnalysis(object):
         self.dist_min_overwrite = 10000  # 10kb
         self.candidate_final_threshold = min_cnv_len #100000  # 100kb
 
+    def genome_median(self):
+        coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
+        coverage_file_handler = gzip.open(coverage_full_path, "rt") if "gz" in self.coverage_file \
+            else open(coverage_full_path, "r")
+
+        coverages = []
+        for line in coverage_file_handler:
+            [chromosome, _1, _2, coverage] = line.rstrip("\n").split("\t")
+            coverage = float(coverage)
+            if chromosome in self.only_chr_list:
+                coverages.append(coverage)
+
+        coverage_file_handler.close()
+
+        return np.nanmedian(coverages)
+
     # Data normalization
     def data_normalization(self):
         """
@@ -89,6 +105,7 @@ class CNVAnalysis(object):
 
         list_index = 0
         previous_chromosome = ""
+        genome_median = self.genome_median()
         for line in coverage_file_handler:
             [chromosome, start, _, coverage] = line.rstrip("\n").split("\t")
             if chromosome in self.only_chr_list:
@@ -110,7 +127,7 @@ class CNVAnalysis(object):
                     # analysis here
                     self.logger.debug(previous_chromosome)
                     self.__remove_n_region_by_chromosome(previous_chromosome)
-                    cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome)
+                    cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median)
                     self.genome_analysis[previous_chromosome] = {"cov_data": cov_data,
                                                                  "statistics": cov_stats,
                                                                  "norm_statistics": norm_stats}
@@ -134,7 +151,7 @@ class CNVAnalysis(object):
 
         # compute leftover chromosome
         self.__remove_n_region_by_chromosome(previous_chromosome)
-        cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome)
+        cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median)
         self.genome_analysis[previous_chromosome] = {"cov_data": cov_data,
                                                      "statistics": cov_stats,
                                                      "norm_statistics": norm_stats}
@@ -156,7 +173,7 @@ class CNVAnalysis(object):
         self.coverage = np.zeros(0)
         self.coverage_log2 = np.zeros(0)
 
-    def __normalization_and_statistics(self, chromosome) -> tuple:
+    def __normalization_and_statistics(self, chromosome, genome_median) -> tuple:
         self.logger.info(f'Number positions to be tested on chromosome {chromosome}: {self.coverage.size}')
         # clean up
         cov_stats = CoverageStatistics()
@@ -178,9 +195,10 @@ class CNVAnalysis(object):
             chromosome_avg_coverage = np.nanmean(self.coverage)
             [avg, std, med] = [float(genome_avg_cov), np.nanstd(self.coverage), np.nanmedian(self.coverage)]
 
-            if chromosome == 'chrY' and chromosome_avg_coverage < genome_avg_cov * 0.75:
-                genome_avg_cov /= 2
-            self.logger.debug([f'avg: {genome_avg_cov}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
+            if chromosome == 'chrX' and chromosome_avg_coverage < genome_median * 0.75:
+                genome_median /= 2
+                
+            self.logger.debug([f'avg: {genome_avg_cov}, median: {genome_median}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
 
             if chromosome in self.genome_info["chr_lengths_by_name"]:
                 # data
@@ -197,7 +215,7 @@ class CNVAnalysis(object):
                 cov_stats.max = np.nanmax(self.coverage)
 
                 # normalization, based on diploid organisms
-                normalize_by = med  # med:median | avg:average
+                normalize_by = genome_median  # med:median | avg:average
                 normalized_candidates = NorAn.normalize_candidates(self.coverage, normalize_by)
                 normalized_candidates_ploidy = normalized_candidates * self.ploidy
                 if len(normalized_candidates) < 1:
@@ -339,8 +357,13 @@ class CNVAnalysis(object):
             dev_candidates_string.append(dev_candidates_merge())
             # Evaluate if the new span is covered by any blacklisted region
             # Check if span_over_blacklisted_region = true if no overlap exists
-            span_over_blacklisted_region = any(
-                any(end0 <= int(val) <= start1 for val in tup) for tup in self.metadata[cnv_cand.chromosome])
+            if cnv_cand.chromosome not in self.metadata.keys():
+                # No blacklisted regions for this chromosome
+                span_over_blacklisted_region = False
+            else:
+                # Found chromosome in blacklist and needs to check all positions
+                span_over_blacklisted_region = any(
+                    any(end0 <= int(val) <= start1 for val in tup) for tup in self.metadata[cnv_cand.chromosome])
 
             if (start1 - end0) < max_merge_distance and same_type and same_cnv_status and \
                     not span_over_blacklisted_region:
