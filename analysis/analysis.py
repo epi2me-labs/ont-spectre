@@ -195,9 +195,10 @@ class CNVAnalysis(object):
             chromosome_avg_coverage = np.nanmean(self.coverage)
             [avg, std, med] = [float(genome_avg_cov), np.nanstd(self.coverage), np.nanmedian(self.coverage)]
 
-            if chromosome == 'chrX' and chromosome_avg_coverage < genome_median * 0.75:
-                genome_median /= 2
-                
+            use_ploidy = self.ploidy
+            if (chromosome == 'chrX' or chromosome == 'chrY') and chromosome_avg_coverage < genome_median * 0.75:
+                use_ploidy = 1
+
             self.logger.debug([f'avg: {genome_avg_cov}, median: {genome_median}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
 
             if chromosome in self.genome_info["chr_lengths_by_name"]:
@@ -217,7 +218,7 @@ class CNVAnalysis(object):
                 # normalization, based on diploid organisms
                 normalize_by = genome_median  # med:median | avg:average
                 normalized_candidates = NorAn.normalize_candidates(self.coverage, normalize_by)
-                normalized_candidates_ploidy = normalized_candidates * self.ploidy
+                normalized_candidates_ploidy = normalized_candidates * use_ploidy
                 if len(normalized_candidates) < 1:
                     normalized_candidates_ploidy = normalized_candidates
 
