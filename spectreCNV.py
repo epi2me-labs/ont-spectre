@@ -8,7 +8,7 @@ class SpectreCNV:
 
     def __init__(self, coverage_dir, bin_size, out_dir, metadata_file_fasta, genome_info, sample_id="",
                  snv_file_vcf="", only_chr_list="", ploidy=2, min_cnv_len=1000000, as_dev=False, dev_params=None,
-                 debug_dir=""):
+                 debug_dir="", dist_proportion=0.25, threshhold_quantile=5):
         self.as_dev = as_dev
         # logger
         logger.basicConfig(level=logger.DEBUG) if as_dev else logger.basicConfig(level=logger.INFO)
@@ -35,13 +35,17 @@ class SpectreCNV:
         self.debug_dir = debug_dir
         # self.cnv_analysis = None  # TODO init by using CNVAnalysis
 
+        self.dist_proportion = dist_proportion
+        self.threshhold_quantile = threshhold_quantile
+
         self.cnv_analysis = CNVAnalysis(coverage_file=self.mosdepth_data.coverage_file,
                                         coverage_mosdepth_data=self.mosdepth_data.mosdepth_summary_data,
                                         output_directory=self.out_dir, outbed=self.out_bed, outvcf=self.out_vcf,
                                         bin_size=self.bin_size, genome_info=self.genome_info, sample_id=self.sample_id,
                                         metadata_ref=self.metadata_reference, snv_file=self.snv_file_vcf,
                                         only_chr_list=self.only_chr_list, ploidy=self.ploidy, min_cnv_len=min_cnv_len,
-                                        as_dev=self.as_dev, dev_params=self.dev_params, debug_dir=self.debug_dir)
+                                        as_dev=self.as_dev, dev_params=self.dev_params, debug_dir=self.debug_dir,
+                                        dist_proportion=self.dist_proportion, threshhold_quantile=self.threshhold_quantile)
 
     def coverage_dir_files(self, coverage_dir):
         coverage_dir = os.path.abspath(os.path.expanduser(coverage_dir))
@@ -92,6 +96,7 @@ class SpectreCNV:
     def cnv_call(self):
         # Data normalization
         self.logger.info("Data normalization and outlier removal (right tail)")
+        self.cnv_analysis.vcf_based_af_bins_annotation()
         self.cnv_analysis.data_normalization()
 
         # Coverage analysis
@@ -102,14 +107,6 @@ class SpectreCNV:
         # self.cnv_analysis.write_intermediate_candidates("raw")
         # refine cnvs
         self.cnv_analysis.refine_cnv_calls(self.as_dev)  # set to self.as_dev
-
-        # SNV analysis
-        if self.snv_file_vcf != "":
-            self.logger.info("CNV candidates by SNV")
-            snv_file_basename_no_dot = "_".join(os.path.basename(self.snv_file_vcf).split('.'))
-            self.snv_file_bed_af = f'{self.out_dir}/{snv_file_basename_no_dot}.bed'
-            self.cnv_analysis.convert_vcf_to_tabular(self.snv_file_bed_af)
-            self.cnv_analysis.call_cnv_af_region()
 
         # CNV metrics
         # self.logger.warning("Disabled CNV metrics")

@@ -6,6 +6,7 @@ import pandas as pd
 import logging as logger
 import util.outputWriter
 import util.vcf_parser as vcf
+import polars as pl
 from util.OSUtil import OSUtil as OSUt
 from util.dataAnalyzer import NormaldataAnalyser as NorAn
 from util.cnv_id import CNV_ID
@@ -17,11 +18,12 @@ from analysis.call_cnv_coverage import CNVCall
 from analysis.call_cnv_AF import CNVCall as CNVAnalysisSNP
 from analysis.cnv_metrics import CNVMetrics
 
+MOSDEPTH_HEADER = ['chrom_', 'start_', 'end_', 'coverage_']
 
 class CNVAnalysis(object):
     def __init__(self, coverage_file, coverage_mosdepth_data, bin_size, output_directory, outbed, outvcf, genome_info,
                  sample_id, metadata_ref, snv_file, only_chr_list="", ploidy=2,min_cnv_len=1000000, as_dev=False,
-                 dev_params=None, debug_dir=""):
+                 dev_params=None, debug_dir="", dist_proportion=0.25, threshhold_quantile=5):
         # input
         self.coverage_file = coverage_file
         self.mosdepth_data = coverage_mosdepth_data  # has chr_mean_coverage, genome_mean_coverage, genome_bases
@@ -60,6 +62,8 @@ class CNVAnalysis(object):
         self.debug_dir = debug_dir
         # cnv metrics
         self.cnv_metrics = None
+        
+        self.coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
 
         # TODO
         self.min_chr_length = 1e6
@@ -69,25 +73,43 @@ class CNVAnalysis(object):
         self.lower_2n_threshold = 0.0  # are overwritten after data_normalization was called
         self.upper_2n_threshold = 0.0  # are overwritten after data_normalization was called
         self.cov_diff_threshold = 0.80
-        self.dist_proportion = 0.25
+        self.dist_proportion = dist_proportion # 0.25
         self.dist_min_overwrite = 10000  # 10kb
         self.candidate_final_threshold = min_cnv_len #100000  # 100kb
+        self.threshhold_quantile = threshhold_quantile
 
     def genome_median(self):
-        coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
-        coverage_file_handler = gzip.open(coverage_full_path, "rt") if "gz" in self.coverage_file \
-            else open(coverage_full_path, "r")
+        return self.coverages_df_diploid['coverage_'].median()
+    
+    @staticmethod
+    def annotate_bins_df(snps_df, EPS = 0.08, EXPECTED_AF = 0.5):
+        # filter homozygous
+        snps_df = snps_df.filter(0.5 - abs(0.5 - pl.col('af_')) > EPS)
 
-        coverages = []
-        for line in coverage_file_handler:
-            [chromosome, _1, _2, coverage] = line.rstrip("\n").split("\t")
-            coverage = float(coverage)
-            if chromosome in self.only_chr_list:
-                coverages.append(coverage)
+        # af_good predictor
+        snps_df = snps_df.with_columns(
+            (abs(pl.col('af_') - EXPECTED_AF) < EPS).alias("af_good"))
 
-        coverage_file_handler.close()
+        # aggragation on bin level (start column)
+        af_good_bins_df = snps_df.group_by('start_', 'chrom_').agg(
+            pl.col("af_good").all()
+        )
 
-        return np.nanmedian(coverages)
+        return af_good_bins_df
+
+    def vcf_based_af_bins_annotation(self):
+        self.logger.info("Parsing VCF to AF freqs file")
+        vcf_parser = vcf.VCFSNVParser(self.min_chr_length, self.as_dev)
+        vcf_df = pl.from_pandas(vcf_parser.vcf_to_dataframe(self.snv_file))
+        vcf_df = vcf_df.with_columns(pl.col('start_').apply(lambda x: x // self.bin_size * self.bin_size))
+
+        af_good_bins_df = self.annotate_bins_df(vcf_df)
+        
+        coverages_df = pl.read_csv(self.coverage_full_path, has_header=False, separator='\t', new_columns=MOSDEPTH_HEADER)
+        coverages_df = coverages_df.join(af_good_bins_df, on=['chrom_', 'start_'], how='left')
+        self.coverages_df = coverages_df.with_columns(pl.col("af_good").fill_null(False))
+
+        self.coverages_df_diploid = self.coverages_df.filter(af_good=True)
 
     # Data normalization
     def data_normalization(self):
@@ -99,9 +121,8 @@ class CNVAnalysis(object):
         if len(file_size_lines) == 0:
             self.logger.error("Empty file")
 
-        coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
-        coverage_file_handler = gzip.open(coverage_full_path, "rt") if "gz" in self.coverage_file \
-            else open(coverage_full_path, "r")
+        coverage_file_handler = gzip.open(self.coverage_full_path, "rt") if "gz" in self.coverage_file \
+            else open(self.coverage_full_path, "r")
 
         list_index = 0
         previous_chromosome = ""
@@ -164,9 +185,15 @@ class CNVAnalysis(object):
                                       ploidy=self.ploidy,
                                       output_dir=self.output_directory,
                                       as_dev=self.as_dev, debug_dir=self.debug_dir)
-        # self.cnv_metrics.get_del_dup_borders()
-        self.lower_2n_threshold = self.cnv_metrics.del_border
-        self.upper_2n_threshold = self.cnv_metrics.dup_border
+
+        # Thresholds borders bounds
+        coverage_lower_threshold = self.coverages_df_diploid['coverage_'].quantile(self.threshhold_quantile / 100)
+        coverage_upper_threshold = self.coverages_df_diploid['coverage_'].quantile(1 - self.threshhold_quantile / 100)
+        self.logger.info(f'Thresholds for coverage, lower (Q{self.threshhold_quantile}): {coverage_lower_threshold}, upper(Q{100 - self.threshhold_quantile}): {coverage_upper_threshold}')
+
+        self.lower_2n_threshold = coverage_lower_threshold / genome_median * self.ploidy
+        self.upper_2n_threshold = coverage_upper_threshold / genome_median * self.ploidy
+        self.logger.info(f'Thresholds for normalized coverage, lower: {self.lower_2n_threshold}, upper: {self.upper_2n_threshold} (normalized by median: {genome_median})')
 
         # clean up
         self.positions = np.zeros(0)
@@ -197,7 +224,7 @@ class CNVAnalysis(object):
 
             use_ploidy = self.ploidy
             if (chromosome == 'chrX' or chromosome == 'chrY') and chromosome_avg_coverage < genome_median * 0.75:
-                use_ploidy = 1
+                use_ploidy = 4
 
             self.logger.debug([f'avg: {genome_avg_cov}, median: {genome_median}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
 
@@ -268,7 +295,7 @@ class CNVAnalysis(object):
             cnv_caller = CNVCall(self.as_dev)
             candidates_cnv_list = cnv_caller.cnv_coverage(self.genome_analysis[each_chromosome]["cov_data"],
                                                           self.bin_size, each_chromosome, self.sample_id,
-                                                          self.cnv_metrics.del_border, self.cnv_metrics.dup_border)
+                                                          self.lower_2n_threshold, self.upper_2n_threshold)
 
             self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in candidates_cnv_list])
             # Generating CNV IDs
