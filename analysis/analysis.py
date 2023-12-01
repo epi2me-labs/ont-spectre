@@ -341,6 +341,11 @@ class CNVAnalysis(object):
                 
             self.logger.debug(f'dev_candidates_string: {dev_candidates_string}')
             self.logger.debug(f'Total merge rounds: {merge_rounds}')
+
+            [n_merges, merged_candidates, _] = self.cnv_candidate_merge(cnv_candidates=merged_candidates,
+                                                                        allow_over_blacklist_merging=True)
+            self.logger.debug(f'Merged with final blacklist ignoring round: {n_merges}')
+
             candidates_cnv_list = self.clean_merged_candidates(merged_candidates)
 
             self.logger.debug('Candidates after merging and filtering:')
@@ -350,7 +355,7 @@ class CNVAnalysis(object):
             candidates_cnv_list = self.clean_merged_candidates(candidates_cnv_list)
         return candidates_cnv_list
 
-    def cnv_candidate_merge(self, cnv_candidates):
+    def cnv_candidate_merge(self, cnv_candidates, allow_over_blacklist_merging: bool = False):
         def dev_candidates_merge(header=False):  # dev
             if header:
                 return f'chr\tleft\tright\tleft_size\tright_size\tcov_left\tcov_right\tdist_OK\ttype_OK\tCN_OK'
@@ -394,7 +399,7 @@ class CNVAnalysis(object):
                     any(end0 <= int(val) <= start1 for val in tup) for tup in self.metadata[cnv_cand.chromosome])
 
             if (start1 - end0) < max_merge_distance and same_type and same_cnv_status and \
-                    not span_over_blacklisted_region:
+                    (not span_over_blacklisted_region or allow_over_blacklist_merging):
                 # merge and extend
                 n_merges += 1
                 cnv_cand.add_candidates(
