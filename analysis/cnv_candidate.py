@@ -48,6 +48,15 @@ class CNVCandidate(object):
         self.merged_sample_references.add(cnv_id)
         self.merged_sample_references |= cnv_merged_ids  # "|" joins sets
 
+    def add_scaffold_candidate(self, scaf_start:int, scaf_end:int, scaf_cov:list, scaf_pos:list):
+        # insert coverage and positions of scaffold into candidate between scaf_start and scaf_end in self.cov and self.pos
+
+        # instert coverage
+        self.cov = self.cov[:scaf_start] + scaf_cov + self.cov[scaf_end:]
+        # insert positions
+        self.pos = self.pos[:scaf_start] + scaf_pos + self.pos[scaf_end:]
+
+
     def set_gt(self):
         if self.cn_status == 0:
             self.gt = "1/1"

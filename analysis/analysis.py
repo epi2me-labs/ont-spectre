@@ -435,36 +435,50 @@ class CNVAnalysis(object):
         n_scaffolds = 0
         cov_data_chr = self.genome_analysis[chromosome_name]["cov_data"]
         _index = 0
-        _cand = final_candidates_list[_index]
-        while _index < len(final_candidates_list) - 1:
-            _cand_next = final_candidates_list[_index + 1]
-            if _cand.type == _cand_next.type:
-                gap_start = np.where(cov_data_chr.positions == _cand.end)
-                gap_end = np.where(cov_data_chr.positions == _cand_next.start)
-                gap_data = cov_data_chr.normalized_cov_ploidy[gap_start[0][0]:gap_end[0][0]]
-                scaf_cov = np.nanmedian(gap_data)
+        while _index < len(final_candidates_list):
+            _cand = final_candidates_list[_index]
+            # get the difference between each position
+            position_diff = np.diff(_cand.pos)
+            # get index of the position_diff where the difference is not equal to the bin size
+            position_diff_index = np.where(position_diff != self.bin_size)
+            if len(position_diff_index[0]) > 0:
+                # fill gaps for each position_diff_index and  reversing list with [::-1] to ensure no index overwritten
+                # for idx1, idx2 in zip(position_diff_index[0][::-1][:-1],position_diff_index[0][::-1][1:]):
+                for idx1 in position_diff_index[0][::-1]:
 
-                # Restricting cnv scaffolding merge over 100 following N regions (NaN values)
-                scaf_cov_nan_overflow = np.count_nonzero(np.isnan(np.array(gap_data))) > 0
-                if abs(
-                        scaf_cov - np.nanmedian(list(_cand.cov) + list(_cand_next.cov))
-                ) <= self.cov_diff_threshold and not scaf_cov_nan_overflow:
-                    _cand.add_candidates(_cand_next.pos, _cand_next.cov, _cand_next.id,
-                                         _cand_next.merged_sample_references)
-                    n_scaffolds += 1
-                else:
-                    _cand.median_coverage_candidates_merged()
-                    cnv_list.append(_cand)
-                    _cand = _cand_next
-            else:
-                _cand.median_coverage_candidates_merged()
-                cnv_list.append(_cand)
-                # init with next
-                _cand = _cand_next
+                    # Indices of current  cov gap in the current candidate
+                    cnv_gap_start_idx = idx1
+                    cnv_gap_end_idx = idx1 + 1
+
+                    # Get chromosomal positions of the gap in the current candidate
+                    gap_in_candidate_start = int(_cand.pos[cnv_gap_start_idx])
+                    gap_in_candidate_end = int(_cand.pos[cnv_gap_end_idx])
+
+                    # get gap indices in the coverage data
+                    gap_start = int(np.where(cov_data_chr.positions == gap_in_candidate_start)[0][0])
+                    gap_end = int(np.where(cov_data_chr.positions == gap_in_candidate_end)[0][0])
+
+                    # get gap data
+                    gap_data = cov_data_chr.normalized_cov_ploidy[gap_start:gap_end]
+                    gap_pos = cov_data_chr.positions[gap_start:gap_end]
+                    scaf_cov = np.nanmedian(gap_data)
+
+                    # get array with scaf_cov values the length of the gap
+                    scaf_cov_array = np.full(len(gap_data), scaf_cov)
+
+                    # Restricting cnv scaffolding merge over 100 following N regions (NaN values)
+                    scaf_cov_nan_overflow = np.count_nonzero(np.isnan(np.array(gap_data))) > 0
+
+                    # Apply coverage to the gap if not to many NaN values are present
+                    if not scaf_cov_nan_overflow:
+                        _cand.add_scaffold_candidate(cnv_gap_start_idx, cnv_gap_end_idx, scaf_cov_array.tolist(),
+                                                     gap_pos.tolist())
+                        n_scaffolds += 1
+
+            _cand.median_coverage_candidates_merged()
+            cnv_list.append(_cand)
             _index += 1
-        # one final
-        _cand.median_coverage_candidates_merged()
-        cnv_list.append(_cand)
+
         return cnv_list
 
     # Output results
