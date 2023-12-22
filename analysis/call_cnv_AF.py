@@ -79,6 +79,8 @@ class CNVCall(object):
             cnv_calls[each_chromosome] = []
             for each_candidate in cnv_candidates[each_chromosome]:
                 af_list = []
+                if not each_chromosome in tabix_file.contigs:
+                    continue
                 for af_overlap_candidate in tabix_file.fetch(each_chromosome, each_candidate.start, each_candidate.end):
                     [_, _, _, af_bin] = af_overlap_candidate.split("\t")
                     af_list.append(float(af_bin))

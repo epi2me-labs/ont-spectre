@@ -76,7 +76,7 @@ class VCFOutput(object):
                 population_mode = True
 
         contigs = self.make_vcf_contigs()
-        vcf_header = ['##fileformat=VCFv4.4', '##FILTER=<ID=PASS,Description="All filters passed">',
+        vcf_header = ['##fileformat=VCFv4.2', '##FILTER=<ID=PASS,Description="All filters passed">',
                       '##source=Spectre', contigs,
                       '##ALT=<ID=DEL,Description="Deletion">',
                       '##ALT=<ID=DUP,Description="Duplications">',

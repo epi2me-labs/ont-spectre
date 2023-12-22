@@ -6,6 +6,7 @@ import pandas as pd
 import logging as logger
 import util.outputWriter
 import util.vcf_parser as vcf
+import polars as pl
 from util.OSUtil import OSUtil as OSUt
 from util.dataAnalyzer import NormaldataAnalyser as NorAn
 from util.cnv_id import CNV_ID
@@ -17,11 +18,12 @@ from analysis.call_cnv_coverage import CNVCall
 from analysis.call_cnv_AF import CNVCall as CNVAnalysisSNP
 from analysis.cnv_metrics import CNVMetrics
 
+MOSDEPTH_HEADER = ['chrom_', 'start_', 'end_', 'coverage_']
 
 class CNVAnalysis(object):
     def __init__(self, coverage_file, coverage_mosdepth_data, bin_size, output_directory, outbed, outvcf, genome_info,
                  sample_id, metadata_ref, snv_file, only_chr_list="", ploidy=2,min_cnv_len=1000000, as_dev=False,
-                 dev_params=None, debug_dir=""):
+                 dev_params=None, debug_dir="", dist_proportion=0.25, threshhold_quantile=5):
         # input
         self.coverage_file = coverage_file
         self.mosdepth_data = coverage_mosdepth_data  # has chr_mean_coverage, genome_mean_coverage, genome_bases
@@ -60,6 +62,8 @@ class CNVAnalysis(object):
         self.debug_dir = debug_dir
         # cnv metrics
         self.cnv_metrics = None
+        
+        self.coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
 
         # TODO
         self.min_chr_length = 1e6
@@ -69,9 +73,43 @@ class CNVAnalysis(object):
         self.lower_2n_threshold = 0.0  # are overwritten after data_normalization was called
         self.upper_2n_threshold = 0.0  # are overwritten after data_normalization was called
         self.cov_diff_threshold = 0.80
-        self.dist_proportion = 0.25
+        self.dist_proportion = dist_proportion # 0.25
         self.dist_min_overwrite = 10000  # 10kb
         self.candidate_final_threshold = min_cnv_len #100000  # 100kb
+        self.threshhold_quantile = threshhold_quantile
+
+    def genome_median(self):
+        return self.coverages_df_diploid['coverage_'].median()
+    
+    @staticmethod
+    def annotate_bins_df(snps_df, EPS = 0.08, EXPECTED_AF = 0.5):
+        # filter homozygous
+        snps_df = snps_df.filter(0.5 - abs(0.5 - pl.col('af_')) > EPS)
+
+        # af_good predictor
+        snps_df = snps_df.with_columns(
+            (abs(pl.col('af_') - EXPECTED_AF) < EPS).alias("af_good"))
+
+        # aggragation on bin level (start column)
+        af_good_bins_df = snps_df.group_by('start_', 'chrom_').agg(
+            pl.col("af_good").all()
+        )
+
+        return af_good_bins_df
+
+    def vcf_based_af_bins_annotation(self):
+        self.logger.info("Parsing VCF to AF freqs file")
+        vcf_parser = vcf.VCFSNVParser(self.min_chr_length, self.as_dev)
+        vcf_df = pl.from_pandas(vcf_parser.vcf_to_dataframe(self.snv_file))
+        vcf_df = vcf_df.with_columns(pl.col('start_').apply(lambda x: x // self.bin_size * self.bin_size))
+
+        af_good_bins_df = self.annotate_bins_df(vcf_df)
+        
+        coverages_df = pl.read_csv(self.coverage_full_path, has_header=False, separator='\t', new_columns=MOSDEPTH_HEADER)
+        coverages_df = coverages_df.join(af_good_bins_df, on=['chrom_', 'start_'], how='left')
+        self.coverages_df = coverages_df.with_columns(pl.col("af_good").fill_null(False))
+
+        self.coverages_df_diploid = self.coverages_df.filter(af_good=True)
 
     # Data normalization
     def data_normalization(self):
@@ -83,12 +121,12 @@ class CNVAnalysis(object):
         if len(file_size_lines) == 0:
             self.logger.error("Empty file")
 
-        coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
-        coverage_file_handler = gzip.open(coverage_full_path, "rt") if "gz" in self.coverage_file \
-            else open(coverage_full_path, "r")
+        coverage_file_handler = gzip.open(self.coverage_full_path, "rt") if "gz" in self.coverage_file \
+            else open(self.coverage_full_path, "r")
 
         list_index = 0
         previous_chromosome = ""
+        genome_median = self.genome_median()
         for line in coverage_file_handler:
             [chromosome, start, _, coverage] = line.rstrip("\n").split("\t")
             if chromosome in self.only_chr_list:
@@ -110,7 +148,7 @@ class CNVAnalysis(object):
                     # analysis here
                     self.logger.debug(previous_chromosome)
                     self.__remove_n_region_by_chromosome(previous_chromosome)
-                    cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome)
+                    cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median)
                     self.genome_analysis[previous_chromosome] = {"cov_data": cov_data,
                                                                  "statistics": cov_stats,
                                                                  "norm_statistics": norm_stats}
@@ -134,7 +172,7 @@ class CNVAnalysis(object):
 
         # compute leftover chromosome
         self.__remove_n_region_by_chromosome(previous_chromosome)
-        cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome)
+        cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median)
         self.genome_analysis[previous_chromosome] = {"cov_data": cov_data,
                                                      "statistics": cov_stats,
                                                      "norm_statistics": norm_stats}
@@ -147,16 +185,22 @@ class CNVAnalysis(object):
                                       ploidy=self.ploidy,
                                       output_dir=self.output_directory,
                                       as_dev=self.as_dev, debug_dir=self.debug_dir)
-        # self.cnv_metrics.get_del_dup_borders()
-        self.lower_2n_threshold = self.cnv_metrics.del_border
-        self.upper_2n_threshold = self.cnv_metrics.dup_border
+
+        # Thresholds borders bounds
+        coverage_lower_threshold = self.coverages_df_diploid['coverage_'].quantile(self.threshhold_quantile / 100)
+        coverage_upper_threshold = self.coverages_df_diploid['coverage_'].quantile(1 - self.threshhold_quantile / 100)
+        self.logger.info(f'Thresholds for coverage, lower (Q{self.threshhold_quantile}): {coverage_lower_threshold}, upper(Q{100 - self.threshhold_quantile}): {coverage_upper_threshold}')
+
+        self.lower_2n_threshold = coverage_lower_threshold / genome_median * self.ploidy
+        self.upper_2n_threshold = coverage_upper_threshold / genome_median * self.ploidy
+        self.logger.info(f'Thresholds for normalized coverage, lower: {self.lower_2n_threshold}, upper: {self.upper_2n_threshold} (normalized by median: {genome_median})')
 
         # clean up
         self.positions = np.zeros(0)
         self.coverage = np.zeros(0)
         self.coverage_log2 = np.zeros(0)
 
-    def __normalization_and_statistics(self, chromosome) -> tuple:
+    def __normalization_and_statistics(self, chromosome, genome_median) -> tuple:
         self.logger.info(f'Number positions to be tested on chromosome {chromosome}: {self.coverage.size}')
         # clean up
         cov_stats = CoverageStatistics()
@@ -166,13 +210,9 @@ class CNVAnalysis(object):
         if self.coverage.size > 0:
             # calculate avg, std, median and remove outliers (right tail)
             # use genome-wide average
-            # NOTE: select average coverage from genome-wide or chromosome depending on how different they are
             genome_avg_cov = self.mosdepth_data.genome_mean_coverage
             chromosome_avg_coverage = np.nanmean(self.coverage)
-            diff_genome_chr_coverage = abs(
-                genome_avg_cov - chromosome_avg_coverage) < genome_avg_cov * self.mosdepth_cov_genome_chr_diff
-            use_this_avg_cov = genome_avg_cov if diff_genome_chr_coverage else chromosome_avg_coverage
-            [avg, std] = [float(use_this_avg_cov), np.nanstd(self.coverage)]
+            [avg, std] = [float(genome_avg_cov), np.nanstd(self.coverage)]
             for idx in range(0, self.coverage.size, 1):
                 cov = self.coverage[idx]
                 if cov > (self.max_std_outlier_cn * avg) + (self.max_std_outlier_rm * std):
@@ -180,9 +220,13 @@ class CNVAnalysis(object):
 
             # re-calculate avg, std, median without outliers (right tail)
             chromosome_avg_coverage = np.nanmean(self.coverage)
-            use_this_avg_cov = genome_avg_cov  # if diff_genome_chr_coverage else chromosome_avg_coverage
-            [avg, std, med] = [float(use_this_avg_cov), np.nanstd(self.coverage), np.nanmedian(self.coverage)]
-            self.logger.debug([f'avg: {genome_avg_cov}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
+            [avg, std, med] = [float(genome_avg_cov), np.nanstd(self.coverage), np.nanmedian(self.coverage)]
+
+            use_ploidy = self.ploidy
+            if (chromosome == 'chrX' or chromosome == 'chrY') and chromosome_avg_coverage < genome_median * 0.75:
+                use_ploidy = 4
+
+            self.logger.debug([f'avg: {genome_avg_cov}, median: {genome_median}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
 
             if chromosome in self.genome_info["chr_lengths_by_name"]:
                 # data
@@ -199,9 +243,9 @@ class CNVAnalysis(object):
                 cov_stats.max = np.nanmax(self.coverage)
 
                 # normalization, based on diploid organisms
-                normalize_by = med  # med:median | avg:average
+                normalize_by = genome_median  # med:median | avg:average
                 normalized_candidates = NorAn.normalize_candidates(self.coverage, normalize_by)
-                normalized_candidates_ploidy = normalized_candidates * self.ploidy
+                normalized_candidates_ploidy = normalized_candidates * use_ploidy
                 if len(normalized_candidates) < 1:
                     normalized_candidates_ploidy = normalized_candidates
 
@@ -251,7 +295,7 @@ class CNVAnalysis(object):
             cnv_caller = CNVCall(self.as_dev)
             candidates_cnv_list = cnv_caller.cnv_coverage(self.genome_analysis[each_chromosome]["cov_data"],
                                                           self.bin_size, each_chromosome, self.sample_id,
-                                                          self.cnv_metrics.del_border, self.cnv_metrics.dup_border)
+                                                          self.lower_2n_threshold, self.upper_2n_threshold)
 
             self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in candidates_cnv_list])
             # Generating CNV IDs
@@ -297,6 +341,11 @@ class CNVAnalysis(object):
                 
             self.logger.debug(f'dev_candidates_string: {dev_candidates_string}')
             self.logger.debug(f'Total merge rounds: {merge_rounds}')
+
+            [n_merges, merged_candidates, _] = self.cnv_candidate_merge(cnv_candidates=merged_candidates,
+                                                                        allow_over_blacklist_merging=True)
+            self.logger.debug(f'Merged with final blacklist ignoring round: {n_merges}')
+
             candidates_cnv_list = self.clean_merged_candidates(merged_candidates)
 
             self.logger.debug('Candidates after merging and filtering:')
@@ -306,7 +355,7 @@ class CNVAnalysis(object):
             candidates_cnv_list = self.clean_merged_candidates(candidates_cnv_list)
         return candidates_cnv_list
 
-    def cnv_candidate_merge(self, cnv_candidates):
+    def cnv_candidate_merge(self, cnv_candidates, allow_over_blacklist_merging: bool = False):
         def dev_candidates_merge(header=False):  # dev
             if header:
                 return f'chr\tleft\tright\tleft_size\tright_size\tcov_left\tcov_right\tdist_OK\ttype_OK\tCN_OK'
@@ -341,11 +390,16 @@ class CNVAnalysis(object):
             dev_candidates_string.append(dev_candidates_merge())
             # Evaluate if the new span is covered by any blacklisted region
             # Check if span_over_blacklisted_region = true if no overlap exists
-            span_over_blacklisted_region = any(
-                any(end0 <= int(val) <= start1 for val in tup) for tup in self.metadata[cnv_cand.chromosome])
+            if cnv_cand.chromosome not in self.metadata.keys():
+                # No blacklisted regions for this chromosome
+                span_over_blacklisted_region = False
+            else:
+                # Found chromosome in blacklist and needs to check all positions
+                span_over_blacklisted_region = any(
+                    any(end0 <= int(val) <= start1 for val in tup) for tup in self.metadata[cnv_cand.chromosome])
 
             if (start1 - end0) < max_merge_distance and same_type and same_cnv_status and \
-                    not span_over_blacklisted_region:
+                    (not span_over_blacklisted_region or allow_over_blacklist_merging):
                 # merge and extend
                 n_merges += 1
                 cnv_cand.add_candidates(
@@ -381,36 +435,50 @@ class CNVAnalysis(object):
         n_scaffolds = 0
         cov_data_chr = self.genome_analysis[chromosome_name]["cov_data"]
         _index = 0
-        _cand = final_candidates_list[_index]
-        while _index < len(final_candidates_list) - 1:
-            _cand_next = final_candidates_list[_index + 1]
-            if _cand.type == _cand_next.type:
-                gap_start = np.where(cov_data_chr.positions == _cand.end)
-                gap_end = np.where(cov_data_chr.positions == _cand_next.start)
-                gap_data = cov_data_chr.normalized_cov_ploidy[gap_start[0][0]:gap_end[0][0]]
-                scaf_cov = np.nanmedian(gap_data)
+        while _index < len(final_candidates_list):
+            _cand = final_candidates_list[_index]
+            # get the difference between each position
+            position_diff = np.diff(_cand.pos)
+            # get index of the position_diff where the difference is not equal to the bin size
+            position_diff_index = np.where(position_diff != self.bin_size)
+            if len(position_diff_index[0]) > 0:
+                # fill gaps for each position_diff_index and  reversing list with [::-1] to ensure no index overwritten
+                # for idx1, idx2 in zip(position_diff_index[0][::-1][:-1],position_diff_index[0][::-1][1:]):
+                for idx1 in position_diff_index[0][::-1]:
 
-                # Restricting cnv scaffolding merge over 100 following N regions (NaN values)
-                scaf_cov_nan_overflow = np.count_nonzero(np.isnan(np.array(gap_data))) > 0
-                if abs(
-                        scaf_cov - np.nanmedian(list(_cand.cov) + list(_cand_next.cov))
-                ) <= self.cov_diff_threshold and not scaf_cov_nan_overflow:
-                    _cand.add_candidates(_cand_next.pos, _cand_next.cov, _cand_next.id,
-                                         _cand_next.merged_sample_references)
-                    n_scaffolds += 1
-                else:
-                    _cand.median_coverage_candidates_merged()
-                    cnv_list.append(_cand)
-                    _cand = _cand_next
-            else:
-                _cand.median_coverage_candidates_merged()
-                cnv_list.append(_cand)
-                # init with next
-                _cand = _cand_next
+                    # Indices of current  cov gap in the current candidate
+                    cnv_gap_start_idx = idx1
+                    cnv_gap_end_idx = idx1 + 1
+
+                    # Get chromosomal positions of the gap in the current candidate
+                    gap_in_candidate_start = int(_cand.pos[cnv_gap_start_idx])
+                    gap_in_candidate_end = int(_cand.pos[cnv_gap_end_idx])
+
+                    # get gap indices in the coverage data
+                    gap_start = int(np.where(cov_data_chr.positions == gap_in_candidate_start)[0][0])
+                    gap_end = int(np.where(cov_data_chr.positions == gap_in_candidate_end)[0][0])
+
+                    # get gap data
+                    gap_data = cov_data_chr.normalized_cov_ploidy[gap_start:gap_end]
+                    gap_pos = cov_data_chr.positions[gap_start:gap_end]
+                    scaf_cov = np.nanmedian(gap_data)
+
+                    # get array with scaf_cov values the length of the gap
+                    scaf_cov_array = np.full(len(gap_data), scaf_cov)
+
+                    # Restricting cnv scaffolding merge over 100 following N regions (NaN values)
+                    scaf_cov_nan_overflow = np.count_nonzero(np.isnan(np.array(gap_data))) > 0
+
+                    # Apply coverage to the gap if not to many NaN values are present
+                    if not scaf_cov_nan_overflow:
+                        _cand.add_scaffold_candidate(cnv_gap_start_idx, cnv_gap_end_idx, scaf_cov_array.tolist(),
+                                                     gap_pos.tolist())
+                        n_scaffolds += 1
+
+            _cand.median_coverage_candidates_merged()
+            cnv_list.append(_cand)
             _index += 1
-        # one final
-        _cand.median_coverage_candidates_merged()
-        cnv_list.append(_cand)
+
         return cnv_list
 
     # Output results
