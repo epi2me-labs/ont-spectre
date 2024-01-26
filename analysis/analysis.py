@@ -77,6 +77,9 @@ class CNVAnalysis(object):
         self.dist_min_overwrite = 10000  # 10kb
         self.candidate_final_threshold = min_cnv_len #100000  # 100kb
         self.threshhold_quantile = threshhold_quantile
+        self.no_call_lower_threshhold = 0.1 # fraction from genome median which chromosome median is compared to to be skiped
+        self.detect_chr_y_threshhold = 0.1 # fraction from genome median which chromosome median is compared to
+        self.chr_y_q = 0.8 # median seems to be 0 even for males, so need to use quntile
 
     def genome_median(self):
         return self.coverages_df_diploid['coverage_'].median()
@@ -111,6 +114,7 @@ class CNVAnalysis(object):
 
         self.coverages_df_diploid = self.coverages_df.filter(af_good=True)
 
+    # TODO: Refactor whole thing using polars
     # Data normalization
     def data_normalization(self):
         """
@@ -127,6 +131,13 @@ class CNVAnalysis(object):
         list_index = 0
         previous_chromosome = ""
         genome_median = self.genome_median()
+
+        # Detecting (chrY have some coverage) to futher normalize chrX and chrY
+        chr_y_cov = self.coverages_df.filter(chrom_='chrY')['coverage_']
+        human_male_flag = len(chr_y_cov) > 0 and chr_y_cov.quantile(self.chr_y_q) > genome_median * self.detect_chr_y_threshhold
+        self.logger.debug(f'chrY len: {len(chr_y_cov)}, chrY quantile({self.chr_y_q}): {chr_y_cov.quantile(self.chr_y_q)}')
+        self.logger.info(f'Human male flag: {human_male_flag}')
+
         for line in coverage_file_handler:
             [chromosome, start, _, coverage] = line.rstrip("\n").split("\t")
             if chromosome in self.only_chr_list:
@@ -148,7 +159,7 @@ class CNVAnalysis(object):
                     # analysis here
                     self.logger.debug(previous_chromosome)
                     self.__remove_n_region_by_chromosome(previous_chromosome)
-                    cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median)
+                    cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median, human_male_flag)
                     self.genome_analysis[previous_chromosome] = {"cov_data": cov_data,
                                                                  "statistics": cov_stats,
                                                                  "norm_statistics": norm_stats}
@@ -172,7 +183,7 @@ class CNVAnalysis(object):
 
         # compute leftover chromosome
         self.__remove_n_region_by_chromosome(previous_chromosome)
-        cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median)
+        cov_stats, norm_stats, cov_data = self.__normalization_and_statistics(previous_chromosome, genome_median, human_male_flag)
         self.genome_analysis[previous_chromosome] = {"cov_data": cov_data,
                                                      "statistics": cov_stats,
                                                      "norm_statistics": norm_stats}
@@ -200,7 +211,7 @@ class CNVAnalysis(object):
         self.coverage = np.zeros(0)
         self.coverage_log2 = np.zeros(0)
 
-    def __normalization_and_statistics(self, chromosome, genome_median) -> tuple:
+    def __normalization_and_statistics(self, chromosome, genome_median, human_male_flag) -> tuple:
         self.logger.info(f'Number positions to be tested on chromosome {chromosome}: {self.coverage.size}')
         # clean up
         cov_stats = CoverageStatistics()
@@ -211,22 +222,23 @@ class CNVAnalysis(object):
             # calculate avg, std, median and remove outliers (right tail)
             # use genome-wide average
             genome_avg_cov = self.mosdepth_data.genome_mean_coverage
-            chromosome_avg_coverage = np.nanmean(self.coverage)
+            chromosome_med_coverage = np.nanmedian(self.coverage)
+            skip_low_cov_chr_flag = chromosome_med_coverage < genome_median * self.no_call_lower_threshhold
+
             [avg, std] = [float(genome_avg_cov), np.nanstd(self.coverage)]
             for idx in range(0, self.coverage.size, 1):
                 cov = self.coverage[idx]
-                if cov > (self.max_std_outlier_cn * avg) + (self.max_std_outlier_rm * std):
+                if (cov > (self.max_std_outlier_cn * avg) + (self.max_std_outlier_rm * std)) or skip_low_cov_chr_flag:
                     self.coverage[idx] = np.NaN
 
             # re-calculate avg, std, median without outliers (right tail)
-            chromosome_avg_coverage = np.nanmean(self.coverage)
             [avg, std, med] = [float(genome_avg_cov), np.nanstd(self.coverage), np.nanmedian(self.coverage)]
 
             use_ploidy = self.ploidy
-            if (chromosome == 'chrX' or chromosome == 'chrY') and chromosome_avg_coverage < genome_median * 0.75:
-                use_ploidy = 4
+            if (chromosome.startswith('chrX') or chromosome.startswith('chrY')) and human_male_flag:
+                use_ploidy = 4 # four is because coverage will be multiplied by ploidy
 
-            self.logger.debug([f'avg: {genome_avg_cov}, median: {genome_median}|{chromosome_avg_coverage}, std: {std}, med: {med}'])
+            self.logger.debug([f'genome avg: {genome_avg_cov}, median: {genome_median} | chromosome avg: {avg}, std: {std}, med: {med}'])
 
             if chromosome in self.genome_info["chr_lengths_by_name"]:
                 # data
