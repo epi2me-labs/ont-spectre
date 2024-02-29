@@ -114,6 +114,7 @@ class SpectreCNV:
         self.cnv_analysis.get_cnv_metrics(refined_cnvs=True)
 
         # Make output files
+        self.cnv_analysis.human_male_flag_txt()
         self.logger.info("Final candidates are written to spc file")
         self.cnv_analysis.write_intermediate_candidates()
         self.logger.info("Results are writen to bed file")

@@ -513,6 +513,11 @@ class CNVAnalysis(object):
         vcf_output = util.outputWriter.VCFOutput(output_vcf, self.genome_info)
         vcf_output.make_vcf(self.genome_analysis.keys(), self.cnv_calls_list, self.sample_id)
 
+    def human_male_flag_txt(self, method=""):
+        output_male_flag = os.path.join(os.path.join(self.output_directory, f'{method}{self.sample_id}_human_male_flag.txt'))
+        with open(output_male_flag, 'w') as f:
+            f.write(repr(self.human_male_flag))
+
     # Plots
     def coverage_plot(self):
         for each_chromosome in self.genome_analysis.keys():
