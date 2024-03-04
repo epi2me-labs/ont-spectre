@@ -493,6 +493,8 @@ class CNVAnalysis(object):
                         n_scaffolds += 1
 
             _cand.median_coverage_candidates_merged()
+            _cand.reinitialize_candidate_values()
+            _cand.set_gt()
             cnv_list.append(_cand)
             _index += 1
 
