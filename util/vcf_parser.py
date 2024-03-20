@@ -84,10 +84,13 @@ class VCFSNVParser(object):
                             if format_.__contains__("VAF"):
                                 # pepper-margin-deepvariant
                                 af_index = format_.split(":").index("VAF")
-                                af = float(sample_.split(":")[af_index])
+                                try:
+                                    af = float(sample_.split(":")[af_index])
+                                except ValueError:
+                                    continue
                                 # self.logger.debug("like pepper-margin-deepvariant")
                             else:
-                                pass
+                                continue
                     elif info_.__contains__("AC"):
                         # longshot
                         ac = list(filter(lambda x: "AC" in x, info_.split(";")))[0].split("=")[1]
