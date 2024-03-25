@@ -1,6 +1,7 @@
 import os
 import gzip
 import pysam
+import json
 import numpy as np
 import pandas as pd
 import logging as logger
@@ -80,7 +81,8 @@ class CNVAnalysis(object):
         self.no_call_lower_threshhold = 0.1 # fraction from genome median which chromosome median is compared to to be skiped
         self.detect_chr_y_threshhold = 0.1 # fraction from genome median which chromosome median is compared to
         self.chr_y_q = 0.8 # median seems to be 0 even for males, so need to use quntile
-        self.human_male_flag = False # to be on safe side, will be initialized in data_normalization
+        self.chr_x_single_flag = False # will be initialized in data_normalization
+        self.chr_y_present_flag = False # will be initialized in data_normalization
 
     def genome_median(self):
         return self.coverages_df_diploid['coverage_'].median()
@@ -115,6 +117,23 @@ class CNVAnalysis(object):
 
         self.coverages_df_diploid = self.coverages_df.filter(af_good=True)
 
+    def detect_xy_chromosome_proidness(self, genome_median, coverage_lower_threshold):
+        # Detecting chrY has some caverage
+        chr_y_cov = self.coverages_df.filter(chrom_='chrY')['coverage_']
+        if len(chr_y_cov) > 0:
+            self.chr_y_present_flag = chr_y_cov.quantile(self.chr_y_q) > genome_median * self.detect_chr_y_threshhold
+                
+            self.logger.debug(f'chrY len: {len(chr_y_cov)}, chrY quantile({self.chr_y_q}): {chr_y_cov.quantile(self.chr_y_q)}')
+            self.logger.debug(f'chrY present flag: {self.chr_y_present_flag}')
+
+        # Detecting chrX has one copy
+        chr_x_cov = self.coverages_df.filter(chrom_='chrX')['coverage_']
+        if len(chr_x_cov) > 0:
+            self.chr_x_single_flag = chr_x_cov.median() < coverage_lower_threshold
+                
+            self.logger.debug(f'chrX len: {len(chr_x_cov)}, chrX median: {chr_x_cov.median()}')
+            self.logger.debug(f'Single chrX flag: {self.chr_x_single_flag}')
+
     # TODO: Refactor whole thing using polars
     # Data normalization
     def data_normalization(self):
@@ -133,11 +152,16 @@ class CNVAnalysis(object):
         previous_chromosome = ""
         genome_median = self.genome_median()
 
-        # Detecting (chrY have some coverage) to futher normalize chrX and chrY
-        chr_y_cov = self.coverages_df.filter(chrom_='chrY')['coverage_']
-        self.human_male_flag = len(chr_y_cov) > 0 and chr_y_cov.quantile(self.chr_y_q) > genome_median * self.detect_chr_y_threshhold
-        self.logger.debug(f'chrY len: {len(chr_y_cov)}, chrY quantile({self.chr_y_q}): {chr_y_cov.quantile(self.chr_y_q)}')
-        self.logger.info(f'Human male flag: {self.human_male_flag}')
+        # Thresholds borders bounds
+        coverage_lower_threshold = self.coverages_df_diploid['coverage_'].quantile(self.threshhold_quantile / 100)
+        coverage_upper_threshold = self.coverages_df_diploid['coverage_'].quantile(1 - self.threshhold_quantile / 100)
+        self.logger.info(f'Thresholds for coverage, lower (Q{self.threshhold_quantile}): {coverage_lower_threshold}, upper(Q{100 - self.threshhold_quantile}): {coverage_upper_threshold}')
+
+        self.lower_2n_threshold = coverage_lower_threshold / genome_median * self.ploidy
+        self.upper_2n_threshold = coverage_upper_threshold / genome_median * self.ploidy
+        self.logger.info(f'Thresholds for normalized coverage, lower: {self.lower_2n_threshold}, upper: {self.upper_2n_threshold} (normalized by median: {genome_median})')
+
+        self.detect_xy_chromosome_proidness(genome_median, coverage_lower_threshold)
 
         for line in coverage_file_handler:
             [chromosome, start, _, coverage] = line.rstrip("\n").split("\t")
@@ -198,15 +222,6 @@ class CNVAnalysis(object):
                                       output_dir=self.output_directory,
                                       as_dev=self.as_dev, debug_dir=self.debug_dir)
 
-        # Thresholds borders bounds
-        coverage_lower_threshold = self.coverages_df_diploid['coverage_'].quantile(self.threshhold_quantile / 100)
-        coverage_upper_threshold = self.coverages_df_diploid['coverage_'].quantile(1 - self.threshhold_quantile / 100)
-        self.logger.info(f'Thresholds for coverage, lower (Q{self.threshhold_quantile}): {coverage_lower_threshold}, upper(Q{100 - self.threshhold_quantile}): {coverage_upper_threshold}')
-
-        self.lower_2n_threshold = coverage_lower_threshold / genome_median * self.ploidy
-        self.upper_2n_threshold = coverage_upper_threshold / genome_median * self.ploidy
-        self.logger.info(f'Thresholds for normalized coverage, lower: {self.lower_2n_threshold}, upper: {self.upper_2n_threshold} (normalized by median: {genome_median})')
-
         # clean up
         self.positions = np.zeros(0)
         self.coverage = np.zeros(0)
@@ -252,9 +267,13 @@ class CNVAnalysis(object):
                 cov_stats.max = np.nanmax(self.coverage)
 
                 # normalization, based on diploid organisms
+                if (self.chr_x_single_flag and chromosome == 'chrX') or (self.chr_y_present_flag and chromosome == 'chrY'):
+                    chr_ploidy = 1
+                else:
+                    chr_ploidy = self.ploidy
                 normalize_by = genome_median  # med:median | avg:average
-                normalized_candidates = NorAn.normalize_candidates(self.coverage, normalize_by)
-                normalized_candidates_ploidy = normalized_candidates * self.ploidy
+                normalized_candidates = NorAn.normalize_candidates(self.coverage, normalize_by) * self.ploidy / chr_ploidy
+                normalized_candidates_ploidy = normalized_candidates * chr_ploidy
                 if len(normalized_candidates) < 1:
                     normalized_candidates_ploidy = normalized_candidates
 
@@ -306,7 +325,7 @@ class CNVAnalysis(object):
             lower_threshold, upper_threshold = (
                 min(self.lower_2n_threshold / 2, 0.5),
                 max(self.upper_2n_threshold / 2, 1.5)
-            ) if (self.human_male_flag and (each_chromosome == 'chrX' or each_chromosome == 'chrY')) else (
+            ) if (self.chr_x_single_flag and each_chromosome == 'chrX') or (self.chr_y_present_flag and each_chromosome == 'chrY') else (
                 self.lower_2n_threshold,
                 self.upper_2n_threshold
             )
@@ -515,10 +534,14 @@ class CNVAnalysis(object):
         vcf_output = util.outputWriter.VCFOutput(output_vcf, self.genome_info)
         vcf_output.make_vcf(self.genome_analysis.keys(), self.cnv_calls_list, self.sample_id)
 
-    def human_male_flag_txt(self, method=""):
-        output_male_flag = os.path.join(os.path.join(self.output_directory, f'{method}{self.sample_id}_human_male_flag.txt'))
+    def karyotype_json(self, method=""):
+        output_male_flag = os.path.join(os.path.join(self.output_directory, f'expected_karyotype.json'))
+        karyotype = {
+                'X' : 1 if self.chr_x_single_flag else 2,
+                'Y' : 1 if self.chr_y_present_flag else 0
+                }
         with open(output_male_flag, 'w') as f:
-            f.write(repr(self.human_male_flag))
+            json.dump(karyotype, f)
 
     # Plots
     def coverage_plot(self):
