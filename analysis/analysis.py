@@ -61,6 +61,10 @@ class CNVAnalysis(object):
         # dev/debug + hidden params
         self.as_dev = as_dev
         self.debug_dir = debug_dir
+
+        # windows stats for charts
+        self.window_stats_dir = f'{self.output_directory}/windows_stats'
+        self.windows_bins = 50
         # cnv metrics
         self.cnv_metrics = None
         
@@ -350,6 +354,7 @@ class CNVAnalysis(object):
             candidates_cnv_list = self.cnv_calls_list[each_chromosome]
             if write_csv:
                 self.dev_write_csv(each_chromosome)
+            self.write_csv_window_agrregate(each_chromosome)
 
             self.logger.debug(f'total cnv candidates in {each_chromosome}: {len(candidates_cnv_list)} before merge')
             final_cnv_candidates = self.merge_candidates(candidates_cnv_list, each_chromosome)
@@ -629,17 +634,37 @@ class CNVAnalysis(object):
         self.intermediate_candidates_file_location = output_path
         return output_path
 
-    # ############################################
-    # dev
-    def dev_write_csv(self, each_chromosome):
+    def collect_csv(self, chr):
         csv_results = pd.DataFrame(
-            data={"position": self.genome_analysis[each_chromosome]["cov_data"].positions,
-                  "mosdepth_cov": self.genome_analysis[each_chromosome]["cov_data"].coverage_raw,
-                  "norm_cov": self.genome_analysis[each_chromosome]["cov_data"].normalized_cov,
-                  "ploidy_cov": self.genome_analysis[each_chromosome]["cov_data"].normalized_cov_ploidy
+            data={"position": self.genome_analysis[chr]["cov_data"].positions,
+                  "mosdepth_cov": self.genome_analysis[chr]["cov_data"].coverage_raw,
+                  "norm_cov": self.genome_analysis[chr]["cov_data"].normalized_cov,
+                  "ploidy_cov": self.genome_analysis[chr]["cov_data"].normalized_cov_ploidy
                   }
         )
-        csv_results["chr"] = each_chromosome
-        output_file = f"{self.debug_dir}/cnv_{self.sample_id}_byCoverage_chr{each_chromosome}.csv"
+        csv_results["chr"] = chr
+        return csv_results
+    
+    # ############################################
+    # dev
+    def dev_write_csv(self, chr):
+        output_file = f"{self.debug_dir}/cnv_{self.sample_id}_byCoverage_chr{chr}.csv"
         self.logger.debug(f"Writing coverage to {output_file}")
-        csv_results.to_csv(output_file, index=False)
+        self.collect_csv(chr).to_csv(output_file, index=False)
+
+    # ############################################
+    # for chart in report
+    def write_csv_window_agrregate(self, chr):
+        window_stats = self.collect_csv(chr).shift(1).rolling(self.windows_bins, step=self.windows_bins).agg({
+            'position': ['min', 'max'], 
+            'mosdepth_cov': 'mean', 
+            'norm_cov': 'mean',
+            'ploidy_cov': 'mean'}
+        ).iloc[1::]
+
+        if not os.path.exists(self.window_stats_dir):
+            os.makedirs(self.window_stats_dir)
+
+        output_file = f"{self.window_stats_dir}/cnv_{self.sample_id}_windows_stats_chr{chr}.csv"
+        self.logger.debug(f"Writing coverage to {output_file}")
+        window_stats.to_csv(output_file, index=False)
