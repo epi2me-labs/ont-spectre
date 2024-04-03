@@ -1,0 +1,43 @@
+# this doesn't work
+# {% set data = load_setup_py_data() %}
+
+package:
+  name: {{ environ.get('CONDA_PKG') }}
+  version: {{ environ.get('CONDA_PKG_VERSION') }}
+
+source:
+    path: ../
+
+build:
+  number: 0
+  script: "{{ PYTHON }} -m pip install . --no-deps --ignore-installed -vv"
+  noarch: python
+
+requirements:
+  host:
+    - pip
+    - python
+  run:
+    - pysam==0.21.0
+    - numpy==1.24.3
+    - pandas==2.0.1
+    - matplotlib==3.7.1
+    - scipy==1.10.1
+    - polars==0.19.15
+
+test:
+  imports:
+    - spectre
+
+about:
+  home: "https://github.com/epi2me-labs/ont-spectre"
+  license_family: OTHER
+  license_file: LICENSE.md
+  summary: "Oxford Nanopore Technologies Plc. fork of Spectre CNV caller"
+  doc_url: https://github.com/epi2me-labs/ont-spectre
+  dev_url: https://github.com/epi2me-labs/ont-spectre
+
+extra:
+  recipe-maintainers:
+    - epi2melabs-bot
+

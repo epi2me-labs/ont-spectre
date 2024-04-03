@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
 import argparse
-import sys
-import spectreCNV
-import spectreCNVPopulation
-import os
-import pysam
 import logging as logger
-from util.metadata.metadataCollector import FastaRef
 from multiprocessing import Pool
+import os
+import sys
+
+import pysam
+
+from spectre import spectreCNV, spectreCNVPopulation, __version__
+from spectre.util.metadata.metadataCollector import FastaRef
 
 
 class SpectreCallParam(object):
@@ -124,7 +124,7 @@ class Spectre:
 
     def __init__(self, as_dev=False):
         # version
-        self.version = "0.1-alpha"
+        self.version = __version__
         self.logger = logger
         self.debug_dir = ""
         # for spectre cnv caller
@@ -330,7 +330,7 @@ def get_arguments():
                 --population   Runs the population mode on all provided samples
                 --threads      Amount of threads (This will boost performance if multiple samples are provided)
 
-                
+
         removeNs:
             Required
                 --reference    Reference genome used for mapping
@@ -341,7 +341,8 @@ def get_arguments():
                 --blacklist    Blacklist in bed format for sites that will be ignored (Default = "")
                 --n-size       Length of consecutive Ns (Default = 5)
                 --save-only    Will only save the metadata file and not show the results in screen (Default = False)
-                
+
+
         population:
             Required
                 --candidates   At least 2 candidate files (.spc or .vcf) which should be taken into consideration for the population mode.
@@ -470,7 +471,7 @@ def get_arguments():
     return args, spectre_help
 
 
-def main():
+def run_main():
     spectre_args, spectre_help = get_arguments()
     command = spectre_args.command
     try:
@@ -503,7 +504,3 @@ def main():
         spectre_run.display_version()
     else:
         logger.error(spectre_help)
-
-
-if __name__ == '__main__':
-    main()

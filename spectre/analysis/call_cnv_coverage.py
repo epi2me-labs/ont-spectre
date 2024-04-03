@@ -1,8 +1,9 @@
-import numpy as np
-from analysis.cnv_candidate import CNVCandidate
-import pandas as pd
 import logging as logger
 
+import numpy as np
+import pandas as pd
+
+from spectre.analysis.cnv_candidate import CNVCandidate
 
 class CNVCall(object):
     def __init__(self, as_dev=False):

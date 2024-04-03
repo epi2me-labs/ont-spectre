@@ -1,5 +1,5 @@
-import random
 import string
+import random
 
 
 class CNV_ID(object):

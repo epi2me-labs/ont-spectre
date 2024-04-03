@@ -1,10 +1,11 @@
+import hashlib
+import logging as logger
+import random
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import hashlib
-import random
 from scipy.stats import ks_2samp, norm
-import logging as logger
 
 
 class CNVMetrics(object):

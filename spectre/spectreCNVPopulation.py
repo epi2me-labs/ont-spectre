@@ -1,10 +1,11 @@
 import gzip
-import os
-import logging as logger
-import traceback
 import json
-from util.outputWriter import VCFOutput
-from analysis.cnv_candidate import CNVCandidate
+import logging as logger
+import os
+import traceback
+
+from spectre.util.outputWriter import VCFOutput
+from spectre.analysis.cnv_candidate import CNVCandidate
 
 
 class SpectrePopulation(object):
