@@ -1,23 +1,24 @@
-import os
 import gzip
-import pysam
 import json
-import numpy as np
-import pandas as pd
 import logging as logger
-import util.outputWriter
-import util.vcf_parser as vcf
+import numpy as np
+import os
+
+import pandas as pd
 import polars as pl
-from util.OSUtil import OSUtil as OSUt
-from util.dataAnalyzer import NormaldataAnalyser as NorAn
-from util.cnv_id import CNV_ID
-from plots.plot import CNVPlot
-from plots.plot import CoveragePlot
-from analysis.coverage_stats import CoverageStatistics
-from analysis.coverage_stats import CoverageData
-from analysis.call_cnv_coverage import CNVCall
-from analysis.call_cnv_AF import CNVCall as CNVAnalysisSNP
-from analysis.cnv_metrics import CNVMetrics
+import pysam
+
+from spectre.analysis.coverage_stats import CoverageStatistics
+from spectre.analysis.coverage_stats import CoverageData
+from spectre.analysis.call_cnv_coverage import CNVCall
+from spectre.analysis.call_cnv_AF import CNVCall as CNVAnalysisSNP
+from spectre.analysis.cnv_metrics import CNVMetrics
+from spectre.plots.plot import CoveragePlot, CNVPlot
+from spectre.util import outputWriter
+from spectre.util import vcf_parser
+from spectre.util.dataAnalyzer import NormaldataAnalyser as NorAn
+from spectre.util.cnv_id import CNV_ID
+from spectre.util.OSUtil import OSUtil as OSUt
 
 MOSDEPTH_HEADER = ['chrom_', 'start_', 'end_', 'coverage_']
 
@@ -67,7 +68,7 @@ class CNVAnalysis(object):
         self.windows_bins = 50
         # cnv metrics
         self.cnv_metrics = None
-        
+ 
         self.coverage_full_path = os.path.abspath(os.path.expanduser(self.coverage_file))
 
         # TODO
@@ -90,7 +91,7 @@ class CNVAnalysis(object):
 
     def genome_median(self):
         return self.coverages_df_diploid['coverage_'].median()
-    
+
     @staticmethod
     def annotate_bins_df(snps_df, EPS = 0.08, EXPECTED_AF = 0.5):
         # filter homozygous
@@ -109,12 +110,12 @@ class CNVAnalysis(object):
 
     def vcf_based_af_bins_annotation(self):
         self.logger.info("Parsing VCF to AF freqs file")
-        vcf_parser = vcf.VCFSNVParser(self.min_chr_length, self.as_dev)
-        vcf_df = pl.from_pandas(vcf_parser.vcf_to_dataframe(self.snv_file))
+        vcf = vcf_parser.VCFSNVParser(self.min_chr_length, self.as_dev)
+        vcf_df = pl.from_pandas(vcf.vcf_to_dataframe(self.snv_file))
         vcf_df = vcf_df.with_columns(pl.col('start_').apply(lambda x: x // self.bin_size * self.bin_size))
 
         af_good_bins_df = self.annotate_bins_df(vcf_df)
-        
+
         coverages_df = pl.read_csv(self.coverage_full_path, has_header=False, separator='\t', new_columns=MOSDEPTH_HEADER)
         coverages_df = coverages_df.join(af_good_bins_df, on=['chrom_', 'start_'], how='left')
         self.coverages_df = coverages_df.with_columns(pl.col("af_good").fill_null(False))
@@ -126,7 +127,7 @@ class CNVAnalysis(object):
         chr_y_cov = self.coverages_df.filter(chrom_='chrY')['coverage_']
         if len(chr_y_cov) > 0:
             self.chr_y_present_flag = chr_y_cov.quantile(self.chr_y_q) > genome_median * self.detect_chr_y_threshhold
-                
+
             self.logger.debug(f'chrY len: {len(chr_y_cov)}, chrY quantile({self.chr_y_q}): {chr_y_cov.quantile(self.chr_y_q)}')
             self.logger.debug(f'chrY present flag: {self.chr_y_present_flag}')
 
@@ -134,7 +135,7 @@ class CNVAnalysis(object):
         chr_x_cov = self.coverages_df.filter(chrom_='chrX')['coverage_']
         if len(chr_x_cov) > 0:
             self.chr_x_single_flag = chr_x_cov.median() < coverage_lower_threshold
-                
+
             self.logger.debug(f'chrX len: {len(chr_x_cov)}, chrX median: {chr_x_cov.median()}')
             self.logger.debug(f'Single chrX flag: {self.chr_x_single_flag}')
 
@@ -360,7 +361,7 @@ class CNVAnalysis(object):
             final_cnv_candidates = self.merge_candidates(candidates_cnv_list, each_chromosome)
             cnv_call_list = self.scaffold_candidates(final_cnv_candidates, each_chromosome) \
                 if len(final_cnv_candidates) >= 2 else final_cnv_candidates
-            
+
             self.logger.debug('Candidates after scaffolding:')
             self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in cnv_call_list])
             self.cnv_calls_list[each_chromosome] = cnv_call_list
@@ -379,7 +380,7 @@ class CNVAnalysis(object):
                 self.logger.info(f'n candidates in {chromosome_name}: {len(merged_candidates)}')
                 [n_merges, merged_candidates, dev_candidates_string] = self.cnv_candidate_merge(merged_candidates)
                 self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in merged_candidates])
-                
+
             self.logger.debug(f'dev_candidates_string: {dev_candidates_string}')
             self.logger.debug(f'Total merge rounds: {merge_rounds}')
 
@@ -531,12 +532,12 @@ class CNVAnalysis(object):
         else:
             output_bed = os.path.join(os.path.join(self.output_directory, f'{method}{self.sample_id}.bed'))
 
-        bed_output = util.outputWriter.BedOutput(output_bed)
+        bed_output = outputWriter.BedOutput(output_bed)
         bed_output.make_bed(self.genome_analysis.keys(), self.cnv_calls_list)
 
     def cnv_result_vcf(self, method=""):
         output_vcf = os.path.join(os.path.join(self.output_directory, f'{method}{self.sample_id}.vcf'))
-        vcf_output = util.outputWriter.VCFOutput(output_vcf, self.genome_info)
+        vcf_output = outputWriter.VCFOutput(output_vcf, self.genome_info)
         vcf_output.make_vcf(self.genome_analysis.keys(), self.cnv_calls_list, self.sample_id)
 
     def karyotype_json(self, method=""):
@@ -574,11 +575,11 @@ class CNVAnalysis(object):
 
     def convert_vcf_to_tabular(self, snv_af_bed_output):
         self.logger.info("Parsing VCF to BED file")
-        vcf_parser = vcf.VCFSNVParser(self.min_chr_length, self.as_dev)
+        vcf = vcf_parser.VCFSNVParser(self.min_chr_length, self.as_dev)
         self.logger.debug("Parsing: VCF -> DataFrame")
-        vcf_df = vcf_parser.vcf_to_dataframe(self.snv_file)
+        vcf_df = vcf.vcf_to_dataframe(self.snv_file)
         self.logger.debug("Parsing: DataFrame -> BED")
-        self.snv_af_df = vcf_parser.dataframe_to_tabular_file(vcf_df, self.coverage_file, snv_af_bed_output)
+        self.snv_af_df = vcf.dataframe_to_tabular_file(vcf_df, self.coverage_file, snv_af_bed_output)
         self.snv_af_bed = snv_af_bed_output
 
     def call_cnv_af_region(self):
@@ -605,7 +606,7 @@ class CNVAnalysis(object):
         :return:
         """
 
-        intermediate_output_writer = util.outputWriter.IntermediateFile(self.output_directory)
+        intermediate_output_writer = outputWriter.IntermediateFile(self.output_directory)
         #genome_info = intermediate_output_writer.convert_candidates_to_dictionary(self.genome_info)
         cnv_calls_list_dict = intermediate_output_writer.convert_candidates_to_dictionary(self.cnv_calls_list)
         raw_cnv_calls_list_dict = intermediate_output_writer.convert_candidates_to_dictionary(self.raw_cnv_calls_list)
@@ -644,7 +645,7 @@ class CNVAnalysis(object):
         )
         csv_results["chr"] = chr
         return csv_results
-    
+
     # ############################################
     # dev
     def dev_write_csv(self, chr):
@@ -656,8 +657,8 @@ class CNVAnalysis(object):
     # for chart in report
     def write_csv_window_agrregate(self, chr):
         window_stats = self.collect_csv(chr).shift(1).rolling(self.windows_bins, step=self.windows_bins).agg({
-            'position': ['min', 'max'], 
-            'mosdepth_cov': 'mean', 
+            'position': ['min', 'max'],
+            'mosdepth_cov': 'mean',
             'norm_cov': 'mean',
             'ploidy_cov': 'mean'}
         ).iloc[1::]

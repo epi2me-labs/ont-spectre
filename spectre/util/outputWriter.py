@@ -1,9 +1,10 @@
-import gzip
-import string
-import random
-import numpy as np
-import json
 from collections import Counter
+import gzip
+import json
+import random
+import string
+
+import numpy as np
 
 
 class BedOutput(object):

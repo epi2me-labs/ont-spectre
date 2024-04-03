@@ -1,5 +1,6 @@
-import numpy as np
 import logging as logger
+
+import numpy as np
 
 
 class CoverageStatistics(object):

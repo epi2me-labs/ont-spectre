@@ -1,5 +1,5 @@
-import os
 import gzip
+import os
 
 
 class OSUtil:

@@ -1,7 +1,7 @@
-import mmap
-import os
 import gzip
 import logging as logger
+import mmap
+import os
 
 
 class FastaRef:

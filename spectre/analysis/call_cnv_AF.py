@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
-import pysam
 import logging as logger
+
+import numpy as np
+import pandas as pd
+import pysam
 
 
 class CNVCall(object):

@@ -1,11 +1,10 @@
-import pandas as pd
-import re
+import gzip
 import logging as logger
 import os
-import pysam
-import gzip
-# from analysis.cnv_candidate import CNVCandidate
+import re
 
+import pandas as pd
+import pysam
 
 class VCFSNVParser(object):
     def __init__(self, min_chromosome_len=1e6, as_dev=False):
