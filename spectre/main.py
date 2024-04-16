@@ -314,6 +314,7 @@ def get_arguments():
                                    <prefix>.regions.bed.gz.csi
                                Can be one or more directories. Example:
                                     --coverage /path/dir1/ /path/dir2/
+                --snv          VCF file containing the SNV for the same sample CNV want to be called
                 --sample-id    Sample name/ID. Can be one or more ID. Example:
                                     --sample-id id1 id2
                 --output-dir   Output directory
@@ -324,7 +325,6 @@ def get_arguments():
                 --blacklist    Blacklist in bed format for sites that will be ignored (Default = "")
                 --only-chr     Comma separated list of chromosomes to use
                 --ploidy       Set the ploidy for the analysis, useful for sex chromosomes (Default = 2)
-                --snv          VCF file containing the SNV for the same sample CNV want to be called
                 --n-size       Length of consecutive Ns (Default = 5)
                 --min_cnv_len  Minimum length of CNV (Default 1mb)
                 --population   Runs the population mode on all provided samples
@@ -370,7 +370,7 @@ def get_arguments():
     cnv_caller_help = "..."
     subparser_cnv_caller = subparsers.add_parser("CNVCaller", help=cnv_caller_help)
     # Required
-    subparser_cnv_caller.add_argument('-b', '--bin-size', type=int, required=True, dest='bin_size', default=500,
+    subparser_cnv_caller.add_argument('-b', '--bin-size', type=int, required=True, dest='bin_size', default=1000,
                                       help='..., default = 1kb')
     subparser_cnv_caller.add_argument('-c', '--coverage', type=str, required=True, dest='coverage_dir', default="",
                                       help='..., default = None', nargs='+')
@@ -380,12 +380,12 @@ def get_arguments():
                                       help='..., default = None')
     subparser_cnv_caller.add_argument('-r', '--reference', type=str, required=True, dest='reference', default="",
                                       help='..., default = None')
+    subparser_cnv_caller.add_argument('-v', '--snv', type=str, required=True, dest='snv_file', default="",
+                                      help='...')
     # Optional, if missing will be created
     subparser_cnv_caller.add_argument('-m', '--metadata', type=str, required=False, dest='metadata', default="",
                                       help='..., default = None')
     # Optional
-    subparser_cnv_caller.add_argument('-v', '--snv', type=str, required=False, dest='snv_file', default="",
-                                      help='...')
     subparser_cnv_caller.add_argument('-l', '--blacklist', type=str, required=False, dest='black_list_file',
                                       default="",
                                       help='...')
@@ -395,8 +395,8 @@ def get_arguments():
                                       help='..., default = 2')
     subparser_cnv_caller.add_argument('-n', '--n-size', type=int, required=False, dest='n_size', default=5,
                                       help='..., default = 5')
-    subparser_cnv_caller.add_argument('-mcl', '--min-cnv-len', type=int, required=False, dest='min_cnv_len', default=1000000,
-                                      help='..., default = 1000000')
+    subparser_cnv_caller.add_argument('-mcl', '--min-cnv-len', type=int, required=False, dest='min_cnv_len', default=80000,
+                                      help='..., default = 80000')
     subparser_cnv_caller.add_argument('-t', '--threads', type=int, required=False, dest='threads', default=1,
                                       help='..., default = 1')
     subparser_cnv_caller.add_argument('-i', '--population', action='store_true', required=False,
@@ -416,13 +416,13 @@ def get_arguments():
     subparser_cnv_caller.add_argument('-05', '--cov-diff-threshold', type=float, required=False,
                                       dest='cov_diff_threshold', default=0.80, help='..., default = 0.80')
     subparser_cnv_caller.add_argument('-06', '--dist-proportion', type=float, required=False, dest='dist_proportion',
-                                      default=0.25, help='..., default = 0.25')
+                                      default=0.3, help='..., default = 0.3')
     subparser_cnv_caller.add_argument('-07', '--candidate-final-threshold', type=int, required=False,
                                       dest='candidate_final_threshold', default=100000,
                                       help='..., default = 100,000')  # 100kb
     subparser_cnv_caller.add_argument('-08', '--threshhold-quantile', type=float, required=False,
-                                      dest='threshhold_quantile', default=5,
-                                      help='..., default = 5')
+                                      dest='threshhold_quantile', default=10,
+                                      help='..., default = 10')
 
     # ############################################################################################ #
     # Metadata to remove Ns
