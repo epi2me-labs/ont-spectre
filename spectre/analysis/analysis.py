@@ -381,7 +381,6 @@ class CNVAnalysis(object):
                 [n_merges, merged_candidates, dev_candidates_string] = self.cnv_candidate_merge(merged_candidates)
                 self.logger.debug([f'{c.start}-{c.end}, ({c.type},{c.size})' for c in merged_candidates])
 
-            self.logger.debug(f'dev_candidates_string: {dev_candidates_string}')
             self.logger.debug(f'Total merge rounds: {merge_rounds}')
 
             [n_merges, merged_candidates, _] = self.cnv_candidate_merge(cnv_candidates=merged_candidates,

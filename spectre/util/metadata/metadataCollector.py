@@ -1,6 +1,5 @@
 import gzip
 import logging as logger
-import mmap
 import os
 
 
@@ -113,42 +112,39 @@ class FastaRef:
         self.__write_report(output_dir, filename)
 
     @classmethod
-    def extract_n_regions_from_report(cls, input_file: str) -> dict:
+    def extract_n_regions_from_report(cls, input_stream) -> dict:
         """
         Loads all N regions that previously have been extracted from the reference genome and stored in a .mdr file
-        :param input_file: /path/to/<file_name>.mdr
+        :param input_stream: A file-like object containing the data in binary format
         :return: dict with all N regions according to the chromosome
         """
         result = dict()
-        # assure abs paths
-        path = os.path.abspath(os.path.expanduser(input_file))
-        with open(path, "r") as fp:
-            # map file into memory
-            mm = mmap.mmap(fp.fileno(), 0, prot=mmap.PROT_READ)
-            for line in iter(mm.readline, b""):
-                # decode line and cut away last char from line (\n)
-                term = line.decode("utf-8")[:-1]
-                if term[:5].__eq__("NSPOS"):
-                    cells = term.strip().split("\t")
-                    if str(cells[1]) not in result:  # [1] = chromosome name
-                        result[str(cells[1])] = []
-                    result[str(cells[1])].append((cells[2], cells[3]))  # [2] start, [3] end
+        while line := input_stream.readline():
+            term = line.decode('utf-8').strip()  # decode from bytes to string and strip whitespace
+            if term[:5] == "NSPOS":
+                cells = term.split("\t")
+                chromosome = cells[1]
+                if chromosome not in result:
+                    result[chromosome] = []
+                result[chromosome].append((cells[2], cells[3]))  # [2] start, [3] end
         return result
 
     @classmethod
-    def extract_blacklisted_regions(cls, input_file: str) -> dict:
+    def extract_blacklisted_regions(cls, input_stream) -> dict:
+        """
+        Extract blacklisted regions from a given input stream.
+        :param input_stream: A file-like object containing the data in binary format.
+        :return: dict with blacklisted regions according to the chromosome.
+        """
         result = dict()
-        path = os.path.abspath(os.path.expanduser(input_file))
-        with open(path, "r") as fp:
-            mm = mmap.mmap(fp.fileno(), 0, prot=mmap.PROT_READ)
-            for line in iter(mm.readline, b""):
-                # decode line and cut away last char from line (\n)
-                term = line.decode("utf-8")[:-1]
-                chrom, start, end = term.split("\t")[:3]
-                if str(chrom) not in result:
-                    result[str(chrom)] = []
-                result[str(chrom)].append((start,end))
+        while line := input_stream.readline():
+            term = line.decode('utf-8').strip()  # Ensure line is decoded from bytes to str before splitting
+            chrom, start, end = term.split("\t")[:3]
+            if chrom not in result:
+                result[chrom] = []
+            result[chrom].append((start, end))
         return result
+
 
     @classmethod
     def merge_metadata(cls, m1:dict, m2:dict)->dict:
