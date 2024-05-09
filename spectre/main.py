@@ -3,6 +3,7 @@ import logging as logger
 from multiprocessing import Pool
 import os
 import sys
+import pkg_resources
 
 import pysam
 
@@ -157,7 +158,6 @@ class Spectre:
 
     def meta_data_extraction(self):
         # ----------- Metadata extraction from ref file  -----------
-        # self.metadata_args.as_dev  # Note: this is not used
         reference_fas = self.metadata_args.reference
         bin_size = self.metadata_args.bin_size
         output_dir = os.path.abspath(os.path.expanduser(self.metadata_args.out_dir))
@@ -171,29 +171,41 @@ class Spectre:
         blacklist_data_bed = self.metadata_args.black_list  # bed format
         self.logger.info("Extraction of metadata is activated")
 
-        # metadata parameter given?
         if meta_data_report != "":
-            meta_data_report = os.path.abspath(os.path.expanduser(meta_data_report))
+            metadata_resource_path = 'data/' + meta_data_report + '.mdr'
+            if pkg_resources.resource_exists(__name__, metadata_resource_path):
+                with pkg_resources.resource_stream(__name__, metadata_resource_path) as meta_data_report_stream:
+                    self.logger.info(f'Extracting metadata from resource: {metadata_resource_path}')
+                    metadata_result = fasta_metadata.extract_n_regions_from_report(meta_data_report_stream)
+            else:
+                path = os.path.abspath(os.path.expanduser(meta_data_report))
+                self.logger.info(f'Extracting metadata from file: {path}')
+                with open(path, 'rb') as f:
+                    metadata_result = fasta_metadata.extract_n_regions_from_report(f)
         else:
-            self.logger.info("Looking for default metadata.mdr")
             meta_data_report = os.path.abspath(os.path.expanduser(default_metadata_name))
-        # metadata file exists
-        if not os.path.exists(meta_data_report):
-            self.logger.info(f'Extracting metadata from {reference_fas}')
+            self.logger.info(f'Generating metadata based on reference: {reference_fas}')
+            self.logger.info(f'Writing metadata to file: {meta_data_report}')
             metadata_result = fasta_metadata.get_n_regions(filepath=reference_fas, report_output_dir=output_dir,
-                                                           out_file_name=meta_data_report, threshold=threshold,
-                                                           bin_size=bin_size, save_only=save_only)
-        else:
-            self.logger.info(f'Extracting metadata from {meta_data_report}')
-            metadata_result = fasta_metadata.extract_n_regions_from_report(meta_data_report)
+                                                            out_file_name=meta_data_report, threshold=threshold,
+                                                            bin_size=bin_size, save_only=save_only)
         if blacklist_data_bed != "":
-            self.logger.debug("Using blacklist")
-            blacklist_results = fasta_metadata.extract_blacklisted_regions(blacklist_data_bed)
+            blacklisr_resource_path = 'data/' + blacklist_data_bed + '.bed'
+            if pkg_resources.resource_exists(__name__, blacklisr_resource_path):
+                with pkg_resources.resource_stream(__name__, blacklisr_resource_path) as blacklist_data_bed_stream:
+                    self.logger.info(f'Using blacklist from resource: {blacklisr_resource_path}')
+                    blacklist_results = fasta_metadata.extract_blacklisted_regions(blacklist_data_bed_stream)
+            else:
+                self.logger.info(f'Extracting blacklist from {blacklist_data_bed}')
+                path = os.path.abspath(os.path.expanduser(blacklist_data_bed))
+                with open(path, 'rb') as f:
+                    blacklist_results = fasta_metadata.extract_blacklisted_regions(f)
             metadata_result = fasta_metadata.merge_metadata(metadata_result, blacklist_results)
-        # return metadata object (dict) after writing to file?
-        if save_only:
-            pass
         else:
+            self.logger.info('No blacklist was provided')
+
+        # return metadata object (dict) after writing to file?
+        if not save_only:
             self.logger.debug("returned meta Object")
             return metadata_result
 
@@ -320,9 +332,11 @@ def get_arguments():
                 --output-dir   Output directory
                 --reference    Reference sequence used for mapping (for N removal)
             Optional, if missing it will be created
-                --metadata     Metadata file for Ns removal
+                --metadata     Metadata file for Ns removal or label of available file in package resources: grch38_metadata
             Optional
-                --blacklist    Blacklist in bed format for sites that will be ignored (Default = "")
+                --blacklist    Blacklist in bed format for sites that will be ignored
+                               or label of available blackslists in package resorces: grch38_blacklist_0.3
+                               (Default = "")
                 --only-chr     Comma separated list of chromosomes to use
                 --ploidy       Set the ploidy for the analysis, useful for sex chromosomes (Default = 2)
                 --n-size       Length of consecutive Ns (Default = 5)
