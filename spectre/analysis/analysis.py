@@ -21,6 +21,7 @@ from spectre.util.cnv_id import CNV_ID
 from spectre.util.OSUtil import OSUtil as OSUt
 
 MOSDEPTH_HEADER = ['chrom_', 'start_', 'end_', 'coverage_']
+MOSDEPTH_DTYPES = [pl.Utf8, pl.Int64, pl.Int64, pl.Float64]
 
 class CNVAnalysis(object):
     def __init__(self, coverage_file, coverage_mosdepth_data, bin_size, output_directory, outbed, outvcf, genome_info,
@@ -116,7 +117,13 @@ class CNVAnalysis(object):
 
         af_good_bins_df = self.annotate_bins_df(vcf_df)
 
-        coverages_df = pl.read_csv(self.coverage_full_path, has_header=False, separator='\t', new_columns=MOSDEPTH_HEADER)
+        coverages_df = pl.read_csv(
+            self.coverage_full_path,
+            has_header=False,
+            separator='\t',
+            new_columns=MOSDEPTH_HEADER,
+            dtypes=MOSDEPTH_DTYPES
+        )
         coverages_df = coverages_df.join(af_good_bins_df, on=['chrom_', 'start_'], how='left')
         self.coverages_df = coverages_df.with_columns(pl.col("af_good").fill_null(False))
 
