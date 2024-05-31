@@ -34,6 +34,14 @@ test:
         paths:
             - dist/*.tar.gz
 
+system_test:
+    stage: test
+    script:
+        - *prep-image
+        - !reference [.install, pyenv]
+        - !reference [.setup, pyenv-python]
+        - make system_test
+
 deploy-checks:
     stage: prerelease
     variables: 

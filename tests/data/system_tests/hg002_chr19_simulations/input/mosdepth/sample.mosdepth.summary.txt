@@ -1,0 +1,3 @@
+chrom	length	bases	mean	min	max
+chr19	58617616	1769890062	30.19	0	493
+chr19_region	58617616	1769890062	30.19	0	493
