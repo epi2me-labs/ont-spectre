@@ -4,6 +4,7 @@ PYTHON ?= python3
 
 IN_VENV=. ./venv/bin/activate
 PROJECT=spectre
+SYSTEM_TEST_SCRIPT=tests/system_tests.sh
 
 venv/bin/activate:
 	test -d venv || $(PYTHON) -m venv venv
@@ -18,6 +19,11 @@ test: venv/bin/activate
 	${IN_VENV} && pip install pytest pytest-cov
 	${IN_VENV} && pytest tests --cov spectre \
 		--cov-report html --cov-report term --cov-report term-missing
+
+system_test: venv/bin/activate
+	${IN_VENV} && pip install bgzip truvari
+	${IN_VENV} && pip install .
+	${IN_VENV} && bash ${SYSTEM_TEST_SCRIPT}
 
 IN_BUILD=. ./pypi_build/bin/activate
 pypi_build/bin/activate:

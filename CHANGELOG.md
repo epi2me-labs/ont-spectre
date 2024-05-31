@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
+### Added
+- System tests based on single chromosome subsample
+
 ### Changed
 - Match default parameters with wf-human-variation
 - Metadata and blacklist can be parsed from package resources
