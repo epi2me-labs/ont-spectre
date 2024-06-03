@@ -34,7 +34,7 @@ class VCFLine(object):
         self.QUAL = "."
         self.FILTER = "."
         self.INFO = "."
-        self.FORMAT = "GT:HO:GQ"
+        self.FORMAT = "GT:HO:GQ:CN"
         self.format_data = []
         self.sample_format_data = {}
         self.supp_vec = {}
@@ -96,6 +96,7 @@ class VCFOutput(object):
         vcf_header += ['##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
                        '##FORMAT=<ID=HO,Number=2,Type=Float,Description="Homozygosity proportion">',
                        '##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype quality">',
+                       '##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Estimated copy number status">',
                        '##FORMAT=<ID=ID,Number=1,Type=String,Description="Population ID of supporting CNV calls">']
 
         if self.population_sample_ids:
@@ -136,7 +137,8 @@ class VCFOutput(object):
                 if not each_candidate.support_cnv_calls:
 
                     vcf_line.format_data = [each_candidate.gt, f'{round(each_candidate.het_score, 2)}',
-                                            f"{int(each_candidate.statistics['z-score']['sample_score'])}"]
+                                            f"{int(each_candidate.statistics['z-score']['sample_score'])}",
+                                            str(each_candidate.cn_status)]
                 else:
                     vcf_line.format_data = []
                     vcf_line.FORMAT += ":ID"  # ADD ID tag in format as everything that is following are IDs

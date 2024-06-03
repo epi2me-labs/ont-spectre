@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [unreleased]
 ### Changed
 - Match default parameters with wf-human-variation
+- Copy CN from INFO field to sample column in vcf output
 - Metadata and blacklist can be parsed from package resources
 
 ### Fixed
