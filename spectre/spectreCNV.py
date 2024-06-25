@@ -122,8 +122,6 @@ class SpectreCNV:
         self.cnv_analysis.cnv_result_bed()
         self.logger.info("Results are writen to VCF file")
         self.cnv_analysis.cnv_result_vcf()
-        self.logger.info("Result plot in progress")
-        self.cnv_analysis.cnv_plot()
 
         # End
         self.logger.info(f"Output dir: {self.out_dir}")
